@@ -1,14 +1,24 @@
 import { Request, Response } from "express";
+
 import { crawlShopifyStore } from "../crawler/shopifyCrawler";
 import { buildEvidence } from "../evidence/buildEvidence";
+
 import { generateCROPrompt } from "../prompts/croPrompt";
+
 import { analyzeEvidence as analyzeRuleBased } from "../analyzer/croAnalyzer";
 import { analyzeEvidence as analyzeAI } from "../services/openaiService";
+
 import { analyzeScreenshot } from "../analyzer/screenshotAnalyzer";
 import { analyzeCategories } from "../analyzer/categoryAnalyzer";
 
-export const analyzeStore = async (req: Request, res: Response) => {
+export const analyzeStore = async (
+  req: Request,
+  res: Response
+) => {
+  const startedAt = Date.now();
+
   try {
+
     const { url } = req.body;
 
     if (!url) {
@@ -17,64 +27,131 @@ export const analyzeStore = async (req: Request, res: Response) => {
         message: "Store URL is required",
       });
     }
-    
-    // 💡 Generate a single unique filename for this tracking loop session
+
+    /* ---------------- Screenshot filename ---------------- */
+
     const screenshotFilename = `screenshot-${Date.now()}.png`;
 
-    // 1. Crawl and shape structural metrics (Passing the filename down)
-    const evidence = await crawlShopifyStore(url, screenshotFilename);
-    const structuredEvidence = buildEvidence(evidence);
+    /* ---------------- Crawl Store ---------------- */
 
-    // 2. Generate local rule-based scores/opportunities
-    const ruleReport = analyzeRuleBased(evidence);  
-     
+    const evidence = await crawlShopifyStore(
+      url,
+      screenshotFilename
+    );
+
+    const structuredEvidence =
+      buildEvidence(evidence);
+
+    /* ---------------- Rule Analysis ---------------- */
+
+    const ruleReport =
+      analyzeRuleBased(evidence);
+
+    /* ---------------- Screenshot Analysis ---------------- */
+
     const screenshotIssues =
-    analyzeScreenshot(evidence);
+      analyzeScreenshot(evidence);
+
+    /* ---------------- Category Scores ---------------- */
 
     const categoryScores =
-analyzeCategories(evidence);
+      analyzeCategories(evidence);
 
-    // 3. Compile the structural prompt and ask Gemini AI
-    const prompt = generateCROPrompt(structuredEvidence);
-    const aiResponse = await analyzeAI(prompt);
+    /* ---------------- AI Analysis ---------------- */
 
-    // 4. Safely parse the strict schema JSON object
-    let aiReportParsed = { overallScore: 100, summary: "", strengths: [], weaknesses: [], opportunities: [] };
+    let aiReportParsed = {
+      overallScore: ruleReport.overallScore,
+      summary: "",
+      strengths: [],
+      weaknesses: [],
+      opportunities: [],
+    };
+
     try {
-      aiReportParsed = JSON.parse(aiResponse);
-    } catch (parseError) {
-      console.error("Critical fallback triggered for AI parse:", parseError);
+
+      const prompt =
+        generateCROPrompt(structuredEvidence);
+
+      const aiResponse =
+        await analyzeAI(prompt);
+
+      aiReportParsed =
+        JSON.parse(aiResponse);
+
+    } catch (err) {
+
+      console.log("Gemini unavailable.");
+      console.log("Using Rule Based Report.");
+
     }
 
-    // 5. Build up the clean static URL string pointing to your Express backend static port
-    // 5. Build Screenshot URL
-const protocol = req.protocol;
-const host = req.get("host");
+    /* ---------------- Screenshot URL ---------------- */
 
-const screenshotUrl = `${protocol}://${host}/screenshots/${screenshotFilename}`;
+    const protocol = req.protocol;
+    const host = req.get("host");
 
-// 6. Send response
-return res.status(200).json({
-  success: true,
+    const screenshotUrl =
+      `${protocol}://${host}/screenshots/${screenshotFilename}`;
 
-  evidence: {
-    ...structuredEvidence,
-    screenshot: screenshotUrl,
-    
-  },
-  screenshotIssues,
-  ruleReport,
-  aiReport: aiReportParsed,
-  categoryScores,
-});
+    /* ---------------- Statistics ---------------- */
+
+    const finishedAt = Date.now();
+
+    const crawlTime =
+      ((finishedAt - startedAt) / 1000).toFixed(2);
+
+    /* ---------------- Response ---------------- */
+
+    return res.status(200).json({
+
+      success: true,
+
+      metadata: {
+
+        analyzedAt: new Date(),
+
+        crawlTime,
+
+        apiVersion: "1.0.0",
+
+        generator: "Shopify CRO Engine",
+
+      },
+
+      evidence: {
+
+        ...structuredEvidence,
+
+        screenshot: screenshotUrl,
+
+      },
+
+      screenshotIssues,
+
+      categoryScores,
+
+      ruleReport,
+
+      aiReport: aiReportParsed,
+
+    });
 
   } catch (error) {
-    console.error("Crawler Error:", error);
+
+    console.error(error);
 
     return res.status(500).json({
+
       success: false,
-      message: "Failed to crawl website",
-      error: error instanceof Error ? error.message : "Unknown error",
+
+      message: "Failed to analyze store",
+
+      error:
+        error instanceof Error
+          ? error.message
+          : "Unknown Error",
+
     });
+
   }
 };

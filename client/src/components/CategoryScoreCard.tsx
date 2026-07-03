@@ -1,3 +1,7 @@
+
+
+import { motion } from "framer-motion";
+
 interface Props{
 
 scores:any;
@@ -14,11 +18,24 @@ return(
 
 <div className="bg-white rounded-2xl shadow-lg p-6">
 
-<h2 className="text-2xl font-bold mb-6">
+<motion.h2
+
+initial={{opacity:0,y:30}}
+
+animate={{opacity:1,y:0}}
+
+transition={{duration:.4}}
+
+className="text-2xl font-bold mb-6"
+
+>
 
 Category Scores
 
-</h2>
+</motion.h2>
+
+
+
 
 <div className="space-y-5">
 
